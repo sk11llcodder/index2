@@ -27,7 +27,7 @@
   --danger: #E5484D;
   --radius-l: 20px;
   --radius-m: 14px;
-  --radius-s: 10px;               
+  --radius-s: 10px;
   --font-display: 'Manrope', sans-serif;
   --font-body: 'Inter', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
@@ -672,15 +672,8 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
     const trust = Math.max(1, Math.min(100, profile.trust || 20));
     document.getElementById('profile-trust').textContent = trust + '/100';
     document.getElementById('profile-trust-fill').style.width = trust + '%';
-const avatarEl = document.getElementById('profile-avatar');
-if (tgUser && tgUser.photo_url) {
-  // Если у Telegram WebApp есть photo_url
-  avatarEl.innerHTML = `<img src="${tgUser.photo_url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
-} else {
-  // В противном случае красивая буква с градиентом
-  const letter = (tgUser?.first_name || profile.first_name || 'U').trim().charAt(0).toUpperCase();
-  avatarEl.textContent = letter;
-}
+    document.getElementById('profile-avatar').textContent = (profile.first_name || '?').trim().charAt(0).toUpperCase();
+  }
 
   document.getElementById('btn-deposit').addEventListener('click', () => showToast('Пополнение временно недоступно'));
   document.getElementById('btn-withdraw').addEventListener('click', () => showToast('Недостаточно средств для вывода'));
@@ -840,30 +833,31 @@ if (tgUser && tgUser.photo_url) {
   const successOverlay = document.getElementById('success-overlay');
   let lastInvite = null;
 
-function openSuccessModal(dealId, inviteStatus, inviteLink) {
-    const botUsername = "OpxDealBot"; 
-    const realInviteLink = inviteLink || `https://t.me/${botUsername}?start=deal_${dealId}`;
+  function openSuccessModal(deal, inviteStatus, inviteLink) {
+    document.getElementById('success-title').textContent = deal.title;
+    document.getElementById('success-desc').textContent = deal.description;
+    document.getElementById('success-amount').textContent = Number(deal.amount).toFixed(2) + ' ' + deal.currency;
+    document.getElementById('success-role').textContent = ROLE_LABEL[deal.role] || 'Участник';
+    document.getElementById('success-id').textContent = '#' + deal.id;
+    document.getElementById('success-counterparty').textContent = deal.counterparty;
 
-    document.getElementById('success-deal-id').textContent = dealId;
-    document.getElementById('invite-link-input').value = realInviteLink;
+    const note = document.getElementById('invite-note');
+    const inviteBtn = document.getElementById('btn-invite');
 
-    const btnShare = document.getElementById('btn-share-invite');
-    if (btnShare) {
-      btnShare.onclick = () => {
-        if (window.Telegram?.WebApp) {
-          window.Telegram.WebApp.openTelegramLink(
-            `https://t.me/share/url?url=${encodeURIComponent(realInviteLink)}&text=${encodeURIComponent('Присоединяйся к сделке в OPX!')}`
-          );
-        } else {
-          navigator.clipboard.writeText(realInviteLink);
-          showToast("Ссылка скопирована!");
-        }
-      };
+    if (inviteStatus === 'sent') {
+      note.textContent = `Контрагент ${deal.counterparty} уже получил приглашение от бота — просто дождитесь его. (в демо: этот username есть в списке "уже писавших боту")`;
+      note.classList.add('is-sent');
+      inviteBtn.hidden = true;
+    } else {
+      note.classList.remove('is-sent');
+      inviteBtn.hidden = false;
+      note.textContent = inviteStatus === 'share_manually'
+        ? `${deal.counterparty} ещё не запускал бота — Telegram не разрешает написать первым. Отправьте ссылку сами. (в демо: попробуйте "@known_person" или "@friend_anna" — они уже "писали боту")`
+        : 'Укажите контрагента заранее, чтобы бот мог отправить приглашение автоматически.';
     }
 
-    closeModal();
-    const successOverlay = document.getElementById('success-modal-overlay');
-    if (successOverlay) successOverlay.classList.add('is-open');
+    lastInvite = { link: inviteLink, status: inviteStatus, counterparty: deal.counterparty, title: deal.title, amount: deal.amount, currency: deal.currency, id: deal.id };
+    successOverlay.classList.add('is-open');
   }
 
   document.getElementById('btn-invite').addEventListener('click', () => {
@@ -883,49 +877,36 @@ function openSuccessModal(dealId, inviteStatus, inviteLink) {
   // ---------------------------------------------------------
   // Отправка формы создания сделки
   // ---------------------------------------------------------
-dealForm.addEventListener('submit', async (e) => {
+  const dealForm = document.getElementById('deal-form');
+  const submitBtn = document.getElementById('deal-submit-btn');
+
+  dealForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const submitBtn = document.getElementById('btn-submit-deal');
-    if (submitBtn) submitBtn.disabled = true;
+    const title = document.getElementById('input-title').value.trim();
+    const description = document.getElementById('input-description').value.trim();
+    const amountVal = document.getElementById('input-amount').value;
+    const amountNum = parseFloat(amountVal);
 
-    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-    const currentUserId = tgUser?.id || 12345678;
-    const currentUserName = tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || "Пользователь");
+    if (!title || !description || isNaN(amountNum) || amountNum <= 0) {
+      showToast('Укажите корректную сумму и поля');
+      return;
+    }
 
-    const payload = {
-      creator_id: currentUserId,
-      creator_name: currentUserName,
-      role: currentRole,
-      title: document.getElementById('input-deal-title').value,
-      terms: document.getElementById('input-deal-terms').value,
-      amount: parseFloat(document.getElementById('input-deal-amount').value),
-      counterparty: document.getElementById('input-deal-counterparty').value
-    };
-
+    submitBtn.disabled = true;
     try {
-      const response = await fetch('http://localhost:8000/api/deals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        alert(result.detail || "Ошибка при создании сделки");
-        return;
-      }
-
+      const payload = {
+        user_id: userId, username: (tgUser && tgUser.username) || '', first_name: (tgUser && tgUser.first_name) || '',
+        role: selectedRole, title, description, amount: amountNum,
+        currency: document.getElementById('input-currency').value,
+        counterparty: document.getElementById('input-counterparty').value.trim(),
+      };
+      const result = await apiPost('/api/deals', payload);
       dealForm.reset();
+      roleButtons[0].click();
       closeModal();
-      openSuccessModal(result.deal_id, 'sent', result.invite_link);
-      showToast("Сделка создана!");
-
-    } catch (err) {
-      console.error(err);
-      alert("Не удалось связаться с Python-сервером!");
+      openSuccessModal(result.deal, result.invite_status, result.invite_link);
     } finally {
-      if (submitBtn) submitBtn.disabled = false;
+      submitBtn.disabled = false;
     }
   });
 
@@ -950,43 +931,8 @@ dealForm.addEventListener('submit', async (e) => {
   // ---------------------------------------------------------
   // Старт
   // ---------------------------------------------------------
-// ---------------------------------------------------------
-  // Старт (Проверка параметра ссылки)
-  // ---------------------------------------------------------
-  const urlParams = new URLSearchParams(window.location.search);
-  const startParam = urlParams.get('tgWebAppStartParam') || urlParams.get('deal_id');
-
-  if (startParam) {
-    const cleanDealId = startParam.replace('deal_', '');
-    showToast(`Загрузка сделки #${cleanDealId}...`);
-    // Открываем сделку для контрагента
-    openDealDetail(cleanDealId);
-  } else {
-    goTo('home');
-  }
+  goTo('home');
 })();
-
-   // Подгрузка аватарки Telegram
-  function loadProfileData() {
-    const avatarEl = document.getElementById('profile-avatar');
-    const nameEl = document.getElementById('profile-name');
-    const userEl = document.getElementById('profile-username');
-    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-
-    if (tgUser) {
-      if (nameEl) nameEl.textContent = tgUser.first_name || "Пользователь";
-      if (userEl) userEl.textContent = tgUser.username ? `@${tgUser.username}` : `ID: ${tgUser.id}`;
-      if (avatarEl) {
-        if (tgUser.photo_url) {
-          avatarEl.innerHTML = `<img src="${tgUser.photo_url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
-        } else {
-          avatarEl.textContent = (tgUser.first_name || 'U').charAt(0).toUpperCase();
-        }
-      }
-    }
-  }
-  loadProfileData();
-   
 </script>
 </body>
 </html>
