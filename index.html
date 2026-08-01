@@ -505,96 +505,8 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
   // здесь — те же данные и та же логика, просто в памяти, без сети.
   // =========================================================
 
-  const MOCK_DB = {
-    // это как будто уже писали боту раньше — их user_id известен
-    usernames: { 'known_person': '900001', 'friend_anna': '900002' },
-    profiles: {
-      'guest': { user_id: 'guest', username: 'my_username', first_name: 'Вы', balance_usdt: 128.5, balance_gram: 40, balance_rub: 0, deals_count: 0, trust: 20 },
-    },
-    deals: {},
-  };
 
-  function mockDealId() {
-    return 'D' + Math.random().toString(36).slice(2, 9).toUpperCase();
-  }
-  function normUsername(u) { return (u || '').trim().replace(/^@/, '').toLowerCase(); }
 
-  async function apiGet(path) {
-    await new Promise((r) => setTimeout(r, 120)); // имитация сетевой задержки
-    const url = new URL(path, 'https://mock.local');
-    const params = Object.fromEntries(url.searchParams.entries());
-
-    if (url.pathname === '/api/profile') {
-      const uid = params.user_id || 'guest';
-      if (!MOCK_DB.profiles[uid]) {
-        MOCK_DB.profiles[uid] = { user_id: uid, username: params.username || null, first_name: params.first_name || 'Пользователь', balance_usdt: 0, balance_gram: 0, balance_rub: 0, deals_count: 0, trust: 20 };
-      }
-      if (MOCK_DB.profiles[uid].username) MOCK_DB.usernames[normUsername(MOCK_DB.profiles[uid].username)] = uid;
-      return MOCK_DB.profiles[uid];
-    }
-
-    if (url.pathname === '/api/deals') {
-      const uid = params.user_id || 'guest';
-      return Object.values(MOCK_DB.deals).filter((d) => d.owner_id === uid || d.counterparty_user_id === uid);
-    }
-
-    const detailMatch = url.pathname.match(/^\/api\/deals\/([^/]+)$/);
-    if (detailMatch) {
-      const deal = MOCK_DB.deals[detailMatch[1]];
-      if (!deal) throw new Error('404');
-      return deal;
-    }
-
-    throw new Error('mock: неизвестный путь ' + path);
-  }
-
-  async function apiPost(path, body) {
-    await new Promise((r) => setTimeout(r, 150));
-
-    if (path === '/api/deals') {
-      const uid = body.user_id || 'guest';
-      if (!MOCK_DB.profiles[uid]) MOCK_DB.profiles[uid] = { user_id: uid, username: body.username, first_name: body.first_name, balance_usdt: 0, balance_gram: 0, balance_rub: 0, deals_count: 0, trust: 20 };
-      if (body.username) MOCK_DB.usernames[normUsername(body.username)] = uid;
-
-      const counterpartyRaw = (body.counterparty || '').trim();
-      const counterpartyUserId = MOCK_DB.usernames[normUsername(counterpartyRaw)] || null;
-
-      const id = mockDealId();
-      const deal = {
-        id, owner_id: uid, role: body.role, title: body.title, description: body.description,
-        amount: Number(body.amount), currency: body.currency,
-        counterparty: counterpartyRaw || 'не указан', counterparty_user_id: counterpartyUserId,
-        status: 'in_progress', created_at: Date.now(), messages: [],
-      };
-      MOCK_DB.deals[id] = deal;
-      MOCK_DB.profiles[uid].deals_count += 1;
-
-      let invite_status = 'no_counterparty';
-      if (counterpartyUserId) invite_status = 'sent'; // тут бот реально отправил бы сообщение
-      else if (counterpartyRaw) invite_status = 'share_manually';
-
-      return { deal, invite_status, invite_link: `https://t.me/OPXGiftRobot?start=deal_${id}` };
-    }
-
-    const statusMatch = path.match(/^\/api\/deals\/([^/]+)\/status$/);
-    if (statusMatch) {
-      const deal = MOCK_DB.deals[statusMatch[1]];
-      deal.status = body.status;
-      return deal;
-    }
-
-    const msgMatch = path.match(/^\/api\/deals\/([^/]+)\/messages$/);
-    if (msgMatch) {
-      const deal = MOCK_DB.deals[msgMatch[1]];
-      const msg = { from: body.user_id, text: body.text, time: Date.now() };
-      deal.messages.push(msg);
-      // демо-автоответ, чтобы показать, как выглядит переписка
-      setTimeout(() => { deal.messages.push({ from: deal.owner_id === body.user_id ? (deal.counterparty_user_id || 'them') : deal.owner_id, text: 'Принято, спасибо за уточнение', time: Date.now() }); }, 900);
-      return msg;
-    }
-
-    throw new Error('mock: неизвестный путь ' + path);
-  }
 
   // ---------------------------------------------------------
   // Telegram WebApp (в браузере вне Telegram — просто no-op)
@@ -604,6 +516,27 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
   const tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || null;
   const userId = String((tgUser && tgUser.id) || 'guest');
 
+// =========================================================
+// РЕАЛЬНЫЙ API (без моков!)
+// =========================================================
+const API_BASE = window.location.origin;  // Берём текущий URL
+
+async function apiGet(path) {
+    const resp = await fetch(API_BASE + path);
+    if (!resp.ok) throw new Error('Ошибка ' + resp.status);
+    return resp.json();
+}
+
+async function apiPost(path, body) {
+    const resp = await fetch(API_BASE + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error('Ошибка ' + resp.status);
+    return resp.json();
+}
+   
   const STATUS_META = {
     in_progress: { label: 'В процессе', cls: 'status-in_progress' },
     paid: { label: 'Оплачена', cls: 'status-paid' },
@@ -637,7 +570,13 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 
   function movePillTo(index) { navbarPill.style.transform = `translateX(${index * 100}%)`; }
 
-  function goTo(target) {
+function goTo(target) {
+    // Если уходим с детального экрана — очищаем параметр deal из URL
+    if (target !== 'deal-detail') {
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+    }
+    
     window.scrollTo(0, 0);
     Object.keys(screens).forEach((key) => { screens[key].hidden = key !== target; });
     const isSubScreen = target === 'deal-detail';
@@ -767,7 +706,11 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
     wrap.scrollTop = wrap.scrollHeight;
   }
 
-  async function openDealDetail(id) {
+async function openDealDetail(id) {
+    // Сохраняем ID в URL (чтобы при обновлении страницы не потерять сделку)
+    const newUrl = window.location.pathname + '?deal=' + id;
+    window.history.replaceState({ deal: id }, '', newUrl);
+    
     let deal;
     try { deal = await apiGet(`/api/deals/${id}?user_id=${encodeURIComponent(userId)}`); }
     catch (e) { showToast('Сделка не найдена'); return; }
@@ -931,7 +874,24 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
   // ---------------------------------------------------------
   // Старт
   // ---------------------------------------------------------
+  // =========================================================
+  // АВТОЗАГРУЗКА СДЕЛКИ ПО ПАРАМЕТРУ ?deal=ID
+  // =========================================================
+  const urlParams = new URLSearchParams(window.location.search);
+  const dealIdFromUrl = urlParams.get('deal');
+
+  // Ждём полной загрузки страницы и переходим к сделке
+  if (dealIdFromUrl) {
+    setTimeout(function() {
+      openDealDetail(dealIdFromUrl);
+    }, 600);
+  }
+
+  // ---------------------------------------------------------
+  // Старт
+  // ---------------------------------------------------------
   goTo('home');
+
 })();
 </script>
 </body>
