@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 /* =========================================================
    OPX — Токены и Базовые стили
@@ -496,6 +497,18 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 <div class="toast" id="toast"></div>
 
 <script>
+
+   // ==========================================
+// ПОДКЛЮЧЕНИЕ К SUPABASE
+// ==========================================
+const SUPABASE_URL = 'https://nmyxvfaqiimdwlidpgpr.supabase.co';
+// Вставь сюда свой скопированный anon public ключ из Supabase (Settings -> API)
+const SUPABASE_ANON_KEY = 'ВСТАВЬ_СЮДА_СКОПИРОВАННЫЙ_ANON_KEY'; 
+
+// Логин твоего бота без символа @
+const BOT_USERNAME = 'ИМЯ_ТВОЕГО_БОТА_bot'; 
+
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 (function () {
   'use strict';
 
@@ -519,7 +532,11 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
 // =========================================================
 // РЕАЛЬНЫЙ API (без моков!)
 // =========================================================
-const API_BASE = window.location.origin;  // Берём текущий URL
+const SUPABASE_URL = 'https://nmyxvfaqiimdwlidpgpr.supabase.co';
+// Замени 'ТВОЙ_ANON_KEY' на длинный ключ из Project Settings -> API -> anon public
+const SUPABASE_ANON_KEY = 'ТВОЙ_ANON_KEY'; 
+
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 async function apiGet(path) {
     const resp = await fetch(API_BASE + path);
@@ -820,39 +837,141 @@ async function openDealDetail(id) {
   // ---------------------------------------------------------
   // Отправка формы создания сделки
   // ---------------------------------------------------------
-  const dealForm = document.getElementById('deal-form');
-  const submitBtn = document.getElementById('deal-submit-btn');
+// ==========================================
+// ОБРАБОТКА СОЗДАНИЯ СДЕЛКИ
+// ==========================================
+const dealForm = document.getElementById('deal-form');
+const submitBtn = document.getElementById('deal-submit-btn') || document.querySelector('#deal-form button[type="submit"]');
 
+if (dealForm) {
   dealForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const title = document.getElementById('input-title').value.trim();
-    const description = document.getElementById('input-description').value.trim();
-    const amountVal = document.getElementById('input-amount').value;
-    const amountNum = parseFloat(amountVal);
+    
+    const titleInput = document.getElementById('input-title') || document.querySelector('input[type="text"]');
+    const amountInput = document.getElementById('input-amount') || document.querySelector('input[type="number"]');
+    
+    const title = titleInput ? titleInput.value.trim() : '';
+    const amountVal = amountInput ? parseFloat(amountInput.value) : 0;
 
-    if (!title || !description || isNaN(amountNum) || amountNum <= 0) {
-      showToast('Укажите корректную сумму и поля');
+    if (!title || isNaN(amountVal) || amountVal <= 0) {
+      alert('Заполните корректно все поля');
       return;
     }
 
-    submitBtn.disabled = true;
+    if (submitBtn) submitBtn.disabled = true;
+
     try {
-      const payload = {
-        user_id: userId, username: (tgUser && tgUser.username) || '', first_name: (tgUser && tgUser.first_name) || '',
-        role: selectedRole, title, description, amount: amountNum,
-        currency: document.getElementById('input-currency').value,
-        counterparty: document.getElementById('input-counterparty').value.trim(),
-      };
-      const result = await apiPost('/api/deals', payload);
+      // 1. Сохранение в Supabase
+      const { data, error } = await supabaseClient
+        .from('deals')
+        .insert([{
+          asset: title,
+          amount: amountVal,
+          role: 'BUYER',
+          status: 'ACTIVE'
+        }])
+        .select();
+
+      if (error || !data || data.length === 0) {
+        console.error('Ошибка Supabase:', error);
+        alert('Ошибка при сохранении в базу данных');
+        return;
+      }
+
+      const createdDeal = data[0];
+
+      // 2. Закрытие модального окна и сброс формы
       dealForm.reset();
-      roleButtons[0].click();
-      closeModal();
-      openSuccessModal(result.deal, result.invite_status, result.invite_link);
+      const modal = document.getElementById('modal-create');
+      if (modal) modal.classList.remove('is-open');
+
+      // 3. Формирование ссылки-приглашения
+      const shareLink = `https://t.me/${BOT_USERNAME}?startapp=deal_${createdDeal.id}`;
+      const shareText = `🤝 Приглашаю вас в сделку "${createdDeal.asset}" на сумму $${createdDeal.amount}!`;
+
+      // 4. Вызов встроенного шеринга Telegram
+      if (window.Telegram?.WebApp?.shareURL) {
+        window.Telegram.WebApp.shareURL(shareLink, shareText);
+      } else {
+        await navigator.clipboard.writeText(shareLink);
+        alert('Ссылка на сделку скопирована в буфер обмена!');
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert('Произошла непредвиденная ошибка');
     } finally {
-      submitBtn.disabled = false;
+      if (submitBtn) submitBtn.disabled = false;
     }
   });
+}// ==========================================
+// ОБРАБОТКА СОЗДАНИЯ СДЕЛКИ
+// ==========================================
+const dealForm = document.getElementById('deal-form');
+const submitBtn = document.getElementById('deal-submit-btn') || document.querySelector('#deal-form button[type="submit"]');
 
+if (dealForm) {
+  dealForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const titleInput = document.getElementById('input-title') || document.querySelector('input[type="text"]');
+    const amountInput = document.getElementById('input-amount') || document.querySelector('input[type="number"]');
+    
+    const title = titleInput ? titleInput.value.trim() : '';
+    const amountVal = amountInput ? parseFloat(amountInput.value) : 0;
+
+    if (!title || isNaN(amountVal) || amountVal <= 0) {
+      alert('Заполните корректно все поля');
+      return;
+    }
+
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+      // 1. Сохранение в Supabase
+      const { data, error } = await supabaseClient
+        .from('deals')
+        .insert([{
+          asset: title,
+          amount: amountVal,
+          role: 'BUYER',
+          status: 'ACTIVE'
+        }])
+        .select();
+
+      if (error || !data || data.length === 0) {
+        console.error('Ошибка Supabase:', error);
+        alert('Ошибка при сохранении в базу данных');
+        return;
+      }
+
+      const createdDeal = data[0];
+
+      // 2. Закрытие модального окна и сброс формы
+      dealForm.reset();
+      const modal = document.getElementById('modal-create');
+      if (modal) modal.classList.remove('is-open');
+
+      // 3. Формирование ссылки-приглашения
+      const shareLink = `https://t.me/${BOT_USERNAME}?startapp=deal_${createdDeal.id}`;
+      const shareText = `🤝 Приглашаю вас в сделку "${createdDeal.asset}" на сумму $${createdDeal.amount}!`;
+
+      // 4. Вызов встроенного шеринга Telegram
+      if (window.Telegram?.WebApp?.shareURL) {
+        window.Telegram.WebApp.shareURL(shareLink, shareText);
+      } else {
+        await navigator.clipboard.writeText(shareLink);
+        alert('Ссылка на сделку скопирована в буфер обмена!');
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert('Произошла непредвиденная ошибка');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  });
+}
   // ---------------------------------------------------------
   // Промокод (демо, без бэкенда)
   // ---------------------------------------------------------
@@ -893,6 +1012,72 @@ async function openDealDetail(id) {
   goTo('home');
 
 })();
+
+   // ==========================================
+// 4. АВТОМАТИЧЕСКАЯ ЗАГРУЗКА СДЕЛКИ ИЗ SUPABASE
+// ==========================================
+async function loadDealFromUrl() {
+  const urlParams = new URLSearchParams(window.location.search);
+  
+  // Получаем ID из URL (поддерживает ?deal=123 или startapp параметры Telegram)
+  let dealId = urlParams.get('deal');
+  
+  const tgStartParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+  if (!dealId && tgStartParam && tgStartParam.startsWith('deal_')) {
+    dealId = tgStartParam.replace('deal_', '');
+  }
+
+  if (!dealId) return; // Если ссылки на сделку нет, остаёмся на главном экране
+
+  try {
+    // Запрашиваем сделку из Supabase
+    const { data: deal, error } = await supabaseClient
+      .from('deals')
+      .select('*')
+      .eq('id', dealId)
+      .single();
+
+    if (error || !deal) {
+      console.error('Ошибка загрузки сделки:', error);
+      alert('Сделка не найдена или была удалена');
+      return;
+    }
+
+    // Переключаем экраны и заполняем данные
+    const homeScreen = document.getElementById('screen-home');
+    const detailScreen = document.getElementById('screen-deal-detail');
+
+    if (homeScreen) homeScreen.hidden = true;
+    if (detailScreen) detailScreen.hidden = false;
+
+    // Заполняем поля на экране
+    const titleEl = document.getElementById('detail-title');
+    const descEl = document.getElementById('detail-desc');
+    const amountEl = document.getElementById('detail-amount');
+    const roleEl = document.getElementById('detail-role');
+
+    if (titleEl) titleEl.textContent = deal.asset || 'Сделка';
+    if (descEl) descEl.textContent = `Статус: ${deal.status || 'АКТИВНА'}`;
+    if (amountEl) amountEl.textContent = `$${deal.amount}`;
+    if (roleEl) roleEl.textContent = deal.role || 'Покупатель';
+
+  } catch (err) {
+    console.error('Ошибка:', err);
+  }
+}
+
+// Настройка кнопки "Назад"
+const backBtn = document.getElementById('detail-back');
+if (backBtn) {
+  backBtn.onclick = () => {
+    document.getElementById('screen-deal-detail').hidden = true;
+    document.getElementById('screen-home').hidden = false;
+  };
+}
+
+// Запускаем проверку при открытии страницы
+loadDealFromUrl();
+   
 </script>
 </body>
 </html>
