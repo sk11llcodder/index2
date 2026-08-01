@@ -27,7 +27,7 @@
   --danger: #E5484D;
   --radius-l: 20px;
   --radius-m: 14px;
-  --radius-s: 10px;
+  --radius-s: 10px;               
   --font-display: 'Manrope', sans-serif;
   --font-body: 'Inter', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
@@ -672,8 +672,15 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
     const trust = Math.max(1, Math.min(100, profile.trust || 20));
     document.getElementById('profile-trust').textContent = trust + '/100';
     document.getElementById('profile-trust-fill').style.width = trust + '%';
-    document.getElementById('profile-avatar').textContent = (profile.first_name || '?').trim().charAt(0).toUpperCase();
-  }
+const avatarEl = document.getElementById('profile-avatar');
+if (tgUser && tgUser.photo_url) {
+  // Если у Telegram WebApp есть photo_url
+  avatarEl.innerHTML = `<img src="${tgUser.photo_url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
+} else {
+  // В противном случае красивая буква с градиентом
+  const letter = (tgUser?.first_name || profile.first_name || 'U').trim().charAt(0).toUpperCase();
+  avatarEl.textContent = letter;
+}
 
   document.getElementById('btn-deposit').addEventListener('click', () => showToast('Пополнение временно недоступно'));
   document.getElementById('btn-withdraw').addEventListener('click', () => showToast('Недостаточно средств для вывода'));
@@ -880,27 +887,26 @@ function openSuccessModal(deal, inviteStatus, inviteLink) {
   // ---------------------------------------------------------
   // Отправка формы создания сделки
   // ---------------------------------------------------------
-const dealForm = document.getElementById('deal-form');
-  dealForm.addEventListener('submit', async (e) => {
+dealForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const submitBtn = document.getElementById('btn-submit-deal');
     submitBtn.disabled = true;
 
-    // Считываем Telegram WebApp данные юзера
-    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+    // Берем реальные данные из Telegram или ставим тестовые
+    const currentUserId = (tgUser && tgUser.id) ? tgUser.id : 12345678;
+    const currentUserName = (tgUser && tgUser.first_name) ? tgUser.first_name : "Пользователь";
 
     const payload = {
-      creator_id: tgUser?.id || 0,
-      creator_name: tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || "Пользователь"),
+      creator_id: currentUserId,
+      creator_name: currentUserName,
       role: currentRole,
-      title: document.getElementById('input-deal-title').value,
-      terms: document.getElementById('input-deal-terms').value,
-      amount: parseFloat(document.getElementById('input-deal-amount').value),
-      counterparty: document.getElementById('input-deal-counterparty').value
+      title: document.getElementById('field-title').value,
+      terms: document.getElementById('field-desc').value,
+      amount: parseFloat(document.getElementById('field-amount').value),
+      counterparty: document.getElementById('field-counterparty').value
     };
 
     try {
-      // Адрес твоего бэкенда FastAPI (замени на свою ссылку, когда выложишь в сеть)
+      // Отправляем на наш Python-сервер
       const response = await fetch('http://localhost:8000/api/deals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -909,21 +915,20 @@ const dealForm = document.getElementById('deal-form');
 
       const result = await response.json();
 
-      // Если контрагент не запустил бота или другая ошибка
       if (!response.ok) {
-        alert(result.detail || "Произошла ошибка при создании сделки");
-        return;
+        throw new Error(result.detail || "Ошибка при создании сделки");
       }
 
-      // Успешно!
       dealForm.reset();
       roleButtons[0].click();
       closeModal();
-      openSuccessModal(result.deal_id, result.message || "Приглашение отправлено!", result.invite_link);
+      
+      // Открываем окно с готовой ссылкой
+      openSuccessModal(result.deal_id, 'sent', result.invite_link);
+      showToast("Сделка создана!");
 
     } catch (err) {
-      console.error(err);
-      alert("Не удалось связаться с сервером! Проверьте, что Python-скрипт запущен.");
+      showToast(err.message);
     } finally {
       submitBtn.disabled = false;
     }
