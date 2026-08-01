@@ -840,13 +840,9 @@ if (tgUser && tgUser.photo_url) {
   const successOverlay = document.getElementById('success-overlay');
   let lastInvite = null;
 
-function openSuccessModal(deal, inviteStatus, inviteLink) {
-    // ВСТАВЬ ТУТ ЮЗЕРНЕЙМ СВОЕГО БОТА (БЕЗ СОБАЧКИ @):
-    const botUsername = "ИМЯ_ТВОЕГО_БОТА"; 
-    
-    // Формируем реферальную ссылку Telegram на бота
-    const dealId = deal.id || deal;
-    const realInviteLink = `https://t.me/${botUsername}?start=deal_${dealId}`;
+function openSuccessModal(dealId, inviteStatus, inviteLink) {
+    const botUsername = "OpxDealBot"; 
+    const realInviteLink = inviteLink || `https://t.me/${botUsername}?start=deal_${dealId}`;
 
     document.getElementById('success-deal-id').textContent = dealId;
     document.getElementById('invite-link-input').value = realInviteLink;
@@ -854,8 +850,7 @@ function openSuccessModal(deal, inviteStatus, inviteLink) {
     const btnShare = document.getElementById('btn-share-invite');
     if (btnShare) {
       btnShare.onclick = () => {
-        // Проверяем, в Telegram ли открыто
-        if (window.Telegram?.WebApp?.shareToStory) {
+        if (window.Telegram?.WebApp) {
           window.Telegram.WebApp.openTelegramLink(
             `https://t.me/share/url?url=${encodeURIComponent(realInviteLink)}&text=${encodeURIComponent('Присоединяйся к сделке в OPX!')}`
           );
@@ -866,8 +861,9 @@ function openSuccessModal(deal, inviteStatus, inviteLink) {
       };
     }
 
-    modalOverlay.classList.remove('is-open');
-    successOverlay.classList.add('is-open');
+    closeModal();
+    const successOverlay = document.getElementById('success-modal-overlay');
+    if (successOverlay) successOverlay.classList.add('is-open');
   }
 
   document.getElementById('btn-invite').addEventListener('click', () => {
@@ -889,24 +885,24 @@ function openSuccessModal(deal, inviteStatus, inviteLink) {
   // ---------------------------------------------------------
 dealForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    submitBtn.disabled = true;
+    const submitBtn = document.getElementById('btn-submit-deal');
+    if (submitBtn) submitBtn.disabled = true;
 
-    // Берем реальные данные из Telegram или ставим тестовые
-    const currentUserId = (tgUser && tgUser.id) ? tgUser.id : 12345678;
-    const currentUserName = (tgUser && tgUser.first_name) ? tgUser.first_name : "Пользователь";
+    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+    const currentUserId = tgUser?.id || 12345678;
+    const currentUserName = tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || "Пользователь");
 
     const payload = {
       creator_id: currentUserId,
       creator_name: currentUserName,
       role: currentRole,
-      title: document.getElementById('field-title').value,
-      terms: document.getElementById('field-desc').value,
-      amount: parseFloat(document.getElementById('field-amount').value),
-      counterparty: document.getElementById('field-counterparty').value
+      title: document.getElementById('input-deal-title').value,
+      terms: document.getElementById('input-deal-terms').value,
+      amount: parseFloat(document.getElementById('input-deal-amount').value),
+      counterparty: document.getElementById('input-deal-counterparty').value
     };
 
     try {
-      // Отправляем на наш Python-сервер
       const response = await fetch('http://localhost:8000/api/deals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -916,21 +912,20 @@ dealForm.addEventListener('submit', async (e) => {
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.detail || "Ошибка при создании сделки");
+        alert(result.detail || "Ошибка при создании сделки");
+        return;
       }
 
       dealForm.reset();
-      roleButtons[0].click();
       closeModal();
-      
-      // Открываем окно с готовой ссылкой
       openSuccessModal(result.deal_id, 'sent', result.invite_link);
       showToast("Сделка создана!");
 
     } catch (err) {
-      showToast(err.message);
+      console.error(err);
+      alert("Не удалось связаться с Python-сервером!");
     } finally {
-      submitBtn.disabled = false;
+      if (submitBtn) submitBtn.disabled = false;
     }
   });
 
@@ -970,6 +965,28 @@ dealForm.addEventListener('submit', async (e) => {
     goTo('home');
   }
 })();
+
+   // Подгрузка аватарки Telegram
+  function loadProfileData() {
+    const avatarEl = document.getElementById('profile-avatar');
+    const nameEl = document.getElementById('profile-name');
+    const userEl = document.getElementById('profile-username');
+    const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+
+    if (tgUser) {
+      if (nameEl) nameEl.textContent = tgUser.first_name || "Пользователь";
+      if (userEl) userEl.textContent = tgUser.username ? `@${tgUser.username}` : `ID: ${tgUser.id}`;
+      if (avatarEl) {
+        if (tgUser.photo_url) {
+          avatarEl.innerHTML = `<img src="${tgUser.photo_url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
+        } else {
+          avatarEl.textContent = (tgUser.first_name || 'U').charAt(0).toUpperCase();
+        }
+      }
+    }
+  }
+  loadProfileData();
+   
 </script>
 </body>
 </html>
