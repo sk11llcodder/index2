@@ -551,30 +551,37 @@ button, input, textarea, select { font-family: inherit; color: inherit; }
   async function apiPost(path, body) {
     await new Promise((r) => setTimeout(r, 150));
 
-    if (path === '/api/deals') {
-      const uid = body.user_id || 'guest';
-      if (!MOCK_DB.profiles[uid]) MOCK_DB.profiles[uid] = { user_id: uid, username: body.username, first_name: body.first_name, balance_usdt: 0, balance_gram: 0, balance_rub: 0, deals_count: 0, trust: 20 };
-      if (body.username) MOCK_DB.usernames[normUsername(body.username)] = uid;
+if (path === '/api/deals') {
 
-      const counterpartyRaw = (body.counterparty || '').trim();
-      const counterpartyUserId = MOCK_DB.usernames[normUsername(counterpartyRaw)] || null;
+  const response = await fetch("http://127.0.0.1:8000/api/deals/create", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      creator_id: body.user_id,
+      invited_id: 2, // пока тестовое значение
+      title: body.title,
+      description: body.description,
+      price: body.amount
+    })
+  });
 
-      const id = mockDealId();
-      const deal = {
-        id, owner_id: uid, role: body.role, title: body.title, description: body.description,
-        amount: Number(body.amount), currency: body.currency,
-        counterparty: counterpartyRaw || 'не указан', counterparty_user_id: counterpartyUserId,
-        status: 'in_progress', created_at: Date.now(), messages: [],
-      };
-      MOCK_DB.deals[id] = deal;
-      MOCK_DB.profiles[uid].deals_count += 1;
+  const result = await response.json();
 
-      let invite_status = 'no_counterparty';
-      if (counterpartyUserId) invite_status = 'sent'; // тут бот реально отправил бы сообщение
-      else if (counterpartyRaw) invite_status = 'share_manually';
-
-      return { deal, invite_status, invite_link: `https://t.me/OPXGiftRobot?start=deal_${id}` };
-    }
+  return {
+    deal: {
+      id: result.deal_id,
+      title: body.title,
+      description: body.description,
+      amount: body.amount,
+      currency: body.currency,
+      status: "pending"
+    },
+    invite_status: "sent",
+    invite_link: `https://t.me/OPXGiftRobot?start=deal_${result.deal_id}`
+  };
+}
 
     const statusMatch = path.match(/^\/api\/deals\/([^/]+)\/status$/);
     if (statusMatch) {
